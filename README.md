@@ -1,7 +1,4 @@
-# Dijkstra
-creation of mesh and shortest path calculation when deemed necessary
-
-function [shortest_path_cost] = Dijkstra(principal,terminal,blockersx, blockersy, polycost,resolution)
+function [shortest_path_cost] = Dijkstra(principal,terminal,blockersx, blockersy, begindex, endex, polycost,resolution,radius)
 %Implementation of Dijkstra's shortest path algorithm in MATLAB.
 %Considering blocking polygons "blockers," with penalized weights to go
 %through them, find the shortest path between two nodes. Begin by defining
@@ -10,14 +7,24 @@ function [shortest_path_cost] = Dijkstra(principal,terminal,blockersx, blockersy
 %latitude then longitude, of the principal node. terminal is the location
 %in LONGITUDE(X) then LATITUDE(Y) of the terminal node. blockers is an n-by-max
 %input matrix where n is the number of blocking polygons and max is the max
-%boundary input for any 1 polygon. resolution is a scalar that creates a
-%mesh of size resolution-by-resolution
-blockersx_find = blockersx(:);
-blockersy_find = blockersy(:);
-%[valuex,indexx] = min([principal(1); terminal(1); blockersx_find]); %once we find minimum x, we must set the y bound to be the same as that point
-%[valuey,indexy] = max
-graph_x = linspace(min([principal(1); terminal(1); blockersx_find])-(1/resolution),max([principal(1); terminal(1); blockersx_find])+(1/resolution),resolution)'; %generates 100 evenly spaced points between the x_coordinates
-graph_y = linspace(min([principal(2); terminal(2); blockersy_find])-(1/resolution),max([principal(2); terminal(2); blockersy_find])+(1/resolution),resolution)'; 
+%boundary input for any 1 polygon. resolution is a scalar that indicates in
+%km the distance between mesh spacings in both the x and y directions. The
+%mesh therefore will not necessarily be square which might skullfuck
+%everything but we can see :)
+%blockersx_find = blockersx(:);
+%blockersy_find = blockersy(:);
+
+%convert values from degrees to kilometers
+
+ 
+%define the boundary of the mesh
+far_left = min([principal(1); terminal(1); blockersx]);
+far_right = max([principal(1); terminal(1); blockersx]);
+bottom = min([principal(2); terminal(2); blockersy]);
+top = max([principal(2); terminal(2); blockersy]);
+resolution = km2deg(resolution, radius);
+graph_x = far_left:resolution:far_right;%linspace(far_left-resolution,far_right+resolution,1/resolution*(abs(far_right-far_left+2*resolution)))'; %why use linspace when you can just space equally 
+graph_y = bottom:resolution:top;%linspace(bottom-resolution,top+resolution,1/resolution*(abs(top-bottom+2*resolution)))'; 
 
 [X,Y] = meshgrid(graph_x,graph_y); %creates a mesh of each of the x points and the y points
 %[m,n] = size(X);
@@ -88,9 +95,17 @@ connect_to = find(t); %returns the indices in the connections, want to convert t
 %need to create weights of connections. evaluate based on geographical
 %distance 
 geo_dist = zeros(length(s),1);
-for i = 1:length(connect_from) %for each of the connections, determine their Euclidean distance 
-    geo_dist(connect_from(i)) = deg2km(sqrt((nodes(s(connect_from(i),1))-nodes(t(connect_to(i),1)))^2 + ... distance determined by finding in the nodes vector the connectors for each of the connections
-        (nodes(s(connect_from(i)),2)-nodes(t(connect_to(i)),2))^2));
+for i = 1:length(connect_from) %for each of the connections, determine their Euclidean distance
+    long1 = nodes(s(connect_from(i),1));
+    long2 = nodes(t(connect_to(i),1));
+    lat1 = nodes(s(connect_from(i),2));
+    lat2 = nodes(t(connect_to(i),2));
+    diff_long = long2 - long1;
+    diff_lat = lat2 - lat1;
+    a = sin(diff_lat/2)^2+cos(lat1)*cos(lat2)*sin(diff_long/2)^2; %step 1 of haversine function
+    c = 2*asin(min(1,sqrt(a))); %step 2 of haversine function
+    d = c * radius; %step 3 of haversine function
+    geo_dist(connect_from(i)) = d;
 end
 weights = geo_dist; %renaming it because i like using more memory i guess
 %now consider if inpolygon 
@@ -103,7 +118,7 @@ inpoly = zeros(q,p);
 %the node index
 for i = 1:q %for the total number of nodes in the mesh to be checked
     for j = 1:p %for the blocking polys
-        if inpolygon(nodes(i,1),nodes(i,2), blockersx(j,:), blockersy(j,:))
+        if inpolygon(nodes(i,1),nodes(i,2), blockersx(begindex(j):endex(j)), blockersy(begindex(j):endex(j)))
             inpoly(i,j) = 1;
         end
     end
@@ -137,27 +152,70 @@ for i = 1:length(R) %for each of the nodes inside a polygon
                 break
         end
         if j <=4 %if it's a connection from the node we're inspecting, then we want to check if the node TO is in the same poly
-            if ismember(t(connections(i,j)),R) && inpolygon(nodes(t(connections(i,j)),1), nodes(t(connections(i,j)),2), blockersx(S(i),:), blockersy(S(i),:))     %geodist(connections(i,j)) < sqrt(deg2km(polyarea(blockersx(S(i),:),blockersy(S(i),:))))%if the adjoining node in the connection is also in the same polygon, determined by first finding it in the set of nodes inpolys and then finding whether same poly
-                dist_in_poly = deg2km(sqrt((nodes(s(connections(i,j)),1)-nodes(t(connections(i,j)),1))^2 + ...
-                (nodes(s(connections(i,j)),2)-nodes(t(connections(i,j)),2))^2))*(polycost(S(i))-1);
+            if ismember(t(connections(i,j)),R) && inpolygon(nodes(t(connections(i,j)),1), nodes(t(connections(i,j)),2), blockersx(begindex(S(i)):endex(S(i))), blockersy(begindex(S(i)):endex(S(i))))     %geodist(connections(i,j)) < sqrt(deg2km(polyarea(blockersx(S(i),:),blockersy(S(i),:))))%if the adjoining node in the connection is also in the same polygon, determined by first finding it in the set of nodes inpolys and then finding whether same poly
+                long1 = nodes(s(connections(i,j)),1);
+                long2 = nodes(t(connections(i,j)),1);
+                lat1 = nodes(s(connections(i,j)),2);
+                lat2 = nodes(t(connections(i,j)),2);
+                diff_long = long2 - long1;
+                diff_lat = lat2 - lat1;
+                a = sin(diff_lat/2)^2+cos(lat1)*cos(lat2)*sin(diff_long/2)^2; %step 1 of haversine function
+                c = 2*asin(min(1,sqrt(a))); %step 2 of haversine function
+                d = c * radius; %step 3 of haversine function
+                dist_in_poly = d*(polycost(S(i))-1);
+                
+                
+                %dist_in_poly = deg2km(sqrt((nodes(s(connections(i,j)),1)-nodes(t(connections(i,j)),1))^2 + ...
+                %(nodes(s(connections(i,j)),2)-nodes(t(connections(i,j)),2))^2))*(polycost(S(i))-1);
             else %the node_to is outside the polygon and so there is an intersection point, which will correspond to the weight
                 [x_poly_intersection, y_poly_intersection] = polyxpoly([nodes(s(connections(i,j)),1) nodes(t(connections(i,j)),1)], ...
-                    [nodes(s(connections(i,j)),2), nodes(t(connections(i,j)),2)], blockersx(S(i),:), blockersy(S(i),:));
-        
-                dist_in_poly = deg2km(sqrt((nodes(s(connections(i,j)),1)-x_poly_intersection(1))^2 + ...
-                    (nodes(s(connections(i,j)),2) - y_poly_intersection(1))^2))*(polycost(S(i))-1); %the distance in the poly of the node i and one of its (up to 6) j connections
+                    [nodes(s(connections(i,j)),2), nodes(t(connections(i,j)),2)], blockersx(begindex(S(i)):endex(S(i))), blockersy(begindex(S(i)):endex(S(i))));
+                
+                long1 = nodes(s(connections(i,j)),1);
+                long2 = x_poly_intersection(1);
+                lat1 = nodes(s(connection(i,j)),1);
+                lat2 = y_poly_intersection(1);
+                diff_long = long2 - long1;
+                diff_lat = lat2 - lat1;
+                a = sin(diff_lat/2)^2+cos(lat1)*cos(lat2)*sin(diff_long/2)^2; %step 1 of haversine function
+                c = 2*asin(min(1,sqrt(a))); %step 2 of haversine function
+                d = c * radius; %step 3 of haversine function
+                dist_in_poly = d*(polycost(S(i))-1);
+                
+                %dist_in_poly = deg2km(sqrt((nodes(s(connections(i,j)),1)-x_poly_intersection(1))^2 + ...
+                 %   (nodes(s(connections(i,j)),2) - y_poly_intersection(1))^2))*(polycost(S(i))-1); %the distance in the poly of the node i and one of its (up to 6) j connections
                 
             end %has a polycost corresponding to the node's home polygon
         else %if it's a connection TO the node we're inspecting, then we want to check if the node FROM is in the same poly
-            if ismember(s(connections(i,j)),R) && inpolygon(nodes(s(connections(i,j)),1), nodes(s(connections(i,j)),2), blockersx(S(i),:), blockersy(S(i),:)) %checking if node FROM is also in poly 
-                dist_in_poly = deg2km(sqrt((nodes(s(connections(i,j)),1)-nodes(t(connections(i,j)),1))^2 + ... if so, then it is the distance between them times the polycost
-                    (nodes(s(connections(i,j)),2)-nodes(t(connections(i,j)),2))^2))*(polycost(S(i))-1);
+            if ismember(s(connections(i,j)),R) && inpolygon(nodes(s(connections(i,j)),1), nodes(s(connections(i,j)),2), blockersx(begindex(S(i)):endex(S(i))), blockersy(begindex(S(i)):endex(S(i)))) %checking if node FROM is also in poly 
+                long1 = nodes(s(connections(i,j)),1);
+                long2 = nodes(t(connections(i,j)),1);
+                lat1 = nodes(s(connections(i,j)),2);
+                lat2 = nodes(t(connections(i,j)),2);
+                diff_long = long2 - long1;
+                diff_lat = lat2 - lat1;
+                a = sin(diff_lat/2)^2+cos(lat1)*cos(lat2)*sin(diff_long/2)^2; %step 1 of haversine function
+                c = 2*asin(min(1,sqrt(a))); %step 2 of haversine function
+                d = c * radius; %step 3 of haversine function
+                dist_in_poly = d*(polycost(S(i))-1);
+                %dist_in_poly = deg2km(sqrt((nodes(s(connections(i,j)),1)-nodes(t(connections(i,j)),1))^2 + ... if so, then it is the distance between them times the polycost
+                %    (nodes(s(connections(i,j)),2)-nodes(t(connections(i,j)),2))^2))*(polycost(S(i))-1);
             else
                 [x_poly_intersection, y_poly_intersection] = polyxpoly([nodes(s(connections(i,j)),1) nodes(t(connections(i,j)),1)], ...
-                    [nodes(s(connections(i,j)),2), nodes(t(connections(i,j)),2)], blockersx(S(i),:), blockersy(S(i),:));
-        
-                dist_in_poly = deg2km(sqrt((nodes(s(connections(i,j)),1)-x_poly_intersection(1))^2 + ...
-                    (nodes(s(connections(i,j)),2) - y_poly_intersection(1))^2))*(polycost(S(i))-1); %the distance in the poly of the node i and one of its (up to 6) j connections
+                    [nodes(s(connections(i,j)),2), nodes(t(connections(i,j)),2)], blockersx(begindex(S(i)):endex(S(i))), blockersy(begindex(S(i)):endex(S(i))));
+                
+                long1 = nodes(s(connections(i,j)),1);
+                long2 = x_poly_intersection(1);
+                lat1 = nodes(s(connections(i,j)),2);
+                lat2 = y_poly_intersection(1);
+                diff_long = long2 - long1;
+                diff_lat = lat2 - lat1;
+                a = sin(diff_lat/2)^2+cos(lat1)*cos(lat2)*sin(diff_long/2)^2; %step 1 of haversine function
+                c = 2*asin(min(1,sqrt(a))); %step 2 of haversine function
+                d = c * radius; %step 3 of haversine function
+                dist_in_poly = d*(polycost(S(i))-1);
+                %dist_in_poly = deg2km(sqrt((nodes(s(connections(i,j)),1)-x_poly_intersection(1))^2 + ...
+                %    (nodes(s(connections(i,j)),2) - y_poly_intersection(1))^2))*(polycost(S(i))-1); %the distance in the poly of the node i and one of its (up to 6) j connections
             end
         end
         if j<=4
